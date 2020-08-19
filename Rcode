@@ -1,0 +1,341 @@
+---
+title: "Team Forest Code"
+output: html_document
+---
+# In Correspondance with Slide's pages
+
+## Page2--Daily Mobility & Covid-19 Cases
+
+```{r}
+library(dplyr)
+library(ggplot2)
+#Data
+covid19 <- read_csv("Desktop/covid19.csv")
+mobility <- read_csv("Desktop/mobility.csv")
+covid19$date <- as.Date(covid19$date, tryFormats = "%d-%m-%Y")
+covid19_use <- covid19 %>% 
+                  filter(prname == c("Ontario","British Columbia","Quebec","Manitoba"))
+#Plot
+Provinces <- as.factor(mobility$sub_region_1)
+plot_retail <- ggplot(data=mobility, aes(x=date, y=retail, group = sub_region_1, colour = Provinces))  +
+  labs(y = "Percentage change", x = "Date", title = "Daily Mobility at Retail") +
+  theme_classic() + 
+  geom_line()
+plot_work <- ggplot(data=mobility, aes(x=date, y=workplaces, group = sub_region_1, colour = Provinces))  +
+  labs(y = "Percentage change", x = "Date", title = "Daily Mobility at Workplaces") +
+  theme_classic() + 
+  geom_line()
+plot_transit <- ggplot(data=mobility, aes(x=date, y=transitstations, group = sub_region_1, colour = Provinces))  +
+  labs(y = "Percentage change", x = "Date", title = "Daily Mobility at Transitstaions") +
+  theme_classic() + 
+  geom_line()
+plot_resid <- ggplot(data=mobility, aes(x=date, y=residential, group = sub_region_1, colour = Provinces))  +
+  labs(y = "Percentage change", x = "Date", title = "Daily Mobility at Residents") +
+  theme_classic() + 
+  geom_line()
+plot_parks <- ggplot(data=mobility, aes(x=date, y=parks, group = sub_region_1, colour = Provinces))  +
+  labs(y = "Percentage change", x = "Date", title = "Daily Mobility at Parks") +
+  theme_classic() + 
+  geom_line()
+Province <- as.factor(covid19_use$prname)
+plot_covid <- ggplot(data=covid19_use, aes(x=date, y=numtoday, group = prname, colour = Province))  +
+  labs(y = "Number of Cases", x = "Date", title = "Covid-19 Daily New Cases") +
+  theme_classic()+
+  geom_line()
+ggarrange(
+  plot_covid, plot_parks, plot_resid, plot_retail, plot_transit, plot_work, labels = c(1:6),
+  common.legend = TRUE, legend = "top"
+)
+```
+
+## Page3--Setting up the models
+
+```{r}
+library(tidyr)
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(ggpubr)
+library(knitr)
+#PM2.5
+trt <- read_csv("Desktop/torontopm2.5.csv", 
+                         col_types = cols(date = col_date(format = "%Y/%m/%d")))
+mobility_ON <- mobility %>% filter(sub_region_2 == "ON")
+pm25_ON <- full_join(mobility_ON, trt)
+#Linear model to see the relationship
+mod1 <- lm(pm2.5 ~ parks , data = pm25_ON)
+summary(mod1)
+plot(pm25_ON$parks, mod1$fitted.values)
+plot(pm25_ON$parks, pm25_ON$pm2.5)
+abline(mod1$coefficients, col= "blue")
+#Gamma GLM model to see the relationship
+mod_gam <- glm(pm2.5 ~ parks, family = Gamma(link = "log"),data = pm25_ON )
+summary(mod_gam)
+#Non-parametric model
+library(mgcv)
+timeOrigin = ISOdate(2020,2,15,0,0,0, tz = "GMT")
+pm25_ON$timeNumeric = as.numeric(difftime(pm25_ON$date,timeOrigin), units = "days")
+mod2 <- gam(pm2.5 ~ s(timeNumeric) + parks , data = pm25_ON)
+knitr::kable(summary(mod2)$p.table, digits = 3)
+summary(mod2)
+dSeq = seq(from = min(pm25_ON$date), by = "10 days", length.out = 10)
+pm25predict <- as.matrix(as.data.frame(predict.gam(mod2,pm25_ON,
+                                                   type = "terms",terms = "s(timeNumeric)",
+                                                   se.fit = TRUE)))
+plot(pm25predict)
+newX = data.frame(date= seq(from = timeOrigin, by = "days", length.out = 4*30))
+newX$timeNumeric = as.numeric(difftime(newX$date,timeOrigin,units = "days"))
+newX = full_join(newX,pm25_ON)[,-c(3:7,9:11)]
+#new data on the web
+newX$parks[106:114] =as.numeric(c("67","84","79","51","58","96","71","131","143"))
+pm25predict = predict(mod2, newX, se.fit = TRUE)
+pm25predict = cbind(newX, pm25predict)
+pm25predict$lower = pm25predict$fit - 2*pm25predict$se.fit
+pm25predict$upper = pm25predict$fit + 2*pm25predict$se.fit
+#Plot
+par(mfrow=c(2,2))
+plot(pm25_ON$date, pm25_ON$pm2.5, xlab = "Date", ylab ="PM2.5", 
+     type = "l", main = "Toronto PM2.5")
+plot(pm25_ON$parks,mod2$fitted.values, xlab = "Parks Mobility", ylab ="PM2.5", main = "PM2.5 and Parks")
+abline(coef = mod2$coefficients[1:2], col = "blue")
+plot(mod2, xlab = "Time(Date)", ylab = "Effect", main = "Time Effect on PM2.5")
+plot(pm25predict$date,pm25predict$fit, type = "n", xlab ="Date", ylab = "PM2.5",
+     xaxs = "i", ylim = c(20,65),main = "Forecast for PM2.5 from Non-parametric model")
+matlines(pm25predict$date,pm25predict[,c("lower","upper","fit")], lty = 1,
+         col = c("grey","grey","black"), lwd = c(2,2,1))
+points(pm25predict$date, pm25predict$pm2.5, cex = 0.5, col = "blue")
+```
+
+```{r}
+#Stock Price
+# correlation
+length(ON_data$transit_stations_percent_change_from_baseline)
+length(ON_data$Stock_ACDVF)
+plot(ON_data$transit_stations_percent_change_from_baseline, ON_data$Stock_ACDVF, 
+     ylab = "stock price", xlab = "transit mobility percentage change", 
+     main = "ploting for transmit percentage change against stock price")
+# linear case
+linear_ACDVF = lm(ON_data$Stock_ACDVF ~ ON_data$transit_stations_percent_change_from_baseline)
+# plot
+plot(ON_data$transit_stations_percent_change_from_baseline, ON_data$Stock_ACDVF, 
+     ylab = "stock price", xlab = "transit mobility percentage change", 
+     main = "ploting for transmit percentage change against stock price")
+abline(linear_ACDVF, col="blue")
+# gamma case
+summary(linear_ACDVF)
+gamma_ACDVF = glm(ON_data$Stock_ACDVF ~ ON_data$transit_stations_percent_change_from_baseline,
+                  family = Gamma(link = "log"))
+summary(gamma_ACDVF)
+with(summary(gamma_ACDVF), 1 - deviance/null.deviance)
+# plot
+plot(ON_data$transit_stations_percent_change_from_baseline, ON_data$Stock_ACDVF, 
+     ylab = "stock price", xlab = "transit mobility percentage change", 
+     main = "ploting for transmit percentage change against stock price")
+shape = 1/summary(gamma_ACDVF)$dispersion
+scale = mean(na.omit(ON_data$Stock_ACDVF))/shape
+lines(x = seq(-75,0, 0.001), y = sort(rgamma(n=75001, shape = shape , scale= scale)), col = "blue")
+par(mfrow=c(1,2))
+plot(ON_data$transit_stations_percent_change_from_baseline, ON_data$Stock_ACDVF, 
+     ylab = "stock price", xlab = "transit mobility percentage change")
+abline(linear_ACDVF, col="blue")
+mtext("LM")
+plot(ON_data$transit_stations_percent_change_from_baseline, ON_data$Stock_ACDVF, 
+     ylab = "stock price", xlab = "transit mobility percentage change")
+lines(x = seq(-75,0, 0.001), y = sort(rgamma(n=75001, shape = shape , scale= scale)), col = "blue")
+mtext("GLM-Gamma")
+```
+
+## Page4--Forecasting
+
+```{r}
+# on transit vs ac stock
+library(forecast)
+transmit_percentage_change = ts(ON_data$transit_stations_percent_change_from_baseline, start=c(2.15,1),freq=30)
+lambda<-BoxCox.lambda(ON_data$transit_stations_percent_change_from_baseline)
+lambda
+trans<-ts(BoxCox(ON_data$transit_stations_percent_change_from_baseline, lambda),start=c(2.15,1),freq=30)
+plot(trans,type="o", main="Time series for transmit change")
+grid()
+plot(stl(trans,s.window=35), main="Decomposition using STL")
+head(stl(trans,s.window=35)$time.series)
+head(stl(trans,s.window=35)$time.series[,"remainder"])
+# Irregular component from STL
+trans.remainder<-stl(trans,s.window=35)$time.series[,"remainder"]
+plot(trans.remainder, type="o", main="The irregular component of trans after transformation")
+grid()
+# acf & pacf
+par(mfrow=c(2,1), cex=0.5)
+acf(trans.remainder, lwd=12, col="red", main=NA)
+pacf(trans.remainder, lwd=12, col="red", main=NA)
+# model estimate
+trans.mod.acf<-arima(trans.remainder, c(0,0,7),include.mean = FALSE)
+trans.mod.pacf<-arima(trans.remainder, c(9,0,0), include.mean=FALSE )
+trans.mod.auto<-auto.arima(trans.remainder,seasonal=FALSE, stationary=TRUE, allowmean = FALSE)
+# Estimation Results
+trans.mod.acf
+trans.mod.pacf
+trans.mod.auto
+#aic comparison
+list(MA7=trans.mod.acf$aic,AR9=trans.mod.pacf$aic,MA5=trans.mod.auto$aic)
+# Lyung-Box
+Box.test(trans.mod.pacf$resid, lag = 24, type = c("Ljung-Box"), fitdf = 9)$p.value
+Box.test(trans.mod.acf$resid, lag = 24, type = c("Ljung-Box"), fitdf = 7)$p.value
+Box.test(trans.mod.auto$resid, lag = 24, type = c("Ljung-Box"), fitdf = 5)$p.value
+# plot
+library(ggplot2)
+#forecast based on Autoregressive model of order 9
+trans.forecast <- forecast (trans.mod.pacf, level=c(95), h=50)
+autoplot(trans.forecast)
+autoplot(forecast(stlm(trans, s.window=35), level=c(95), h=50))
+autoplot(forecast(stlm(transmit_percentage_change, s.window=35, lambda = lambda ), level=c(95), h=50))
+trans.forcast.plot = autoplot(forecast(stlm(transmit_percentage_change, s.window=35, lambda = lambda ), level=c(95), h=50))
+library(forecast)
+new_ACDVF_series = ts(new_ACDVF, start=c(2.15,1),freq=21)
+lambda<-BoxCox.lambda(new_ACDVF)
+lambda
+ACDVF<-ts(BoxCox(new_ACDVF, lambda),start=c(2.15,1),freq=21)
+plot(ACDVF,type="o", main="Time series for transmit change")
+grid()
+plot(stl(ACDVF,s.window=35), main="Decomposition using STL")
+head(stl(ACDVF,s.window=35)$time.series)
+head(stl(ACDVF,s.window=35)$time.series[,"remainder"])
+# Irregular component from STL
+ACDVF.remainder<-stl(ACDVF,s.window=35)$time.series[,"remainder"]
+plot(ACDVF.remainder, type="o", main="The irregular component of trans after transformation")
+grid()
+# acf & pacf
+par(mfrow=c(2,1), cex=0.5)
+acf(ACDVF.remainder, lwd=12, col="red", main=NA)
+pacf(ACDVF.remainder, lwd=12, col="red", main=NA)
+# model estimate
+ACDVF.mod.acf<-arima(ACDVF.remainder, c(0,0,6),include.mean = FALSE)
+ACDVF.mod.pacf<-arima(ACDVF.remainder, c(4,0,0), include.mean=FALSE )
+ACDVF.mod.auto<-auto.arima(ACDVF.remainder,seasonal=FALSE, stationary=TRUE, allowmean = FALSE)
+# Estimation Results
+ACDVF.mod.acf
+ACDVF.mod.pacf
+ACDVF.mod.auto
+#aic comparison
+list(MA6=ACDVF.mod.acf$aic,AR4 = ACDVF.mod.pacf$aic,AR1=ACDVF.mod.auto$aic)
+# Lyung-Box
+Box.test(ACDVF.mod.pacf$resid, lag = 24, type = c("Ljung-Box"), fitdf = 4)$p.value
+Box.test(ACDVF.mod.acf$resid, lag = 24, type = c("Ljung-Box"), fitdf = 6)$p.value
+Box.test(ACDVF.mod.auto$resid, lag = 24, type = c("Ljung-Box"), fitdf = 1)$p.value
+# plot
+library(ggplot2)
+#forecast based on Autoregressive model of order 4
+ACDVF.forecast <- forecast (ACDVF.mod.acf, level=c(95), h=50)
+autoplot(ACDVF.forecast)
+autoplot(forecast(stlm(ACDVF, s.window=35), level=c(95), h=50))
+autoplot(forecast(stlm(new_ACDVF_series, s.window=35, lambda = lambda ), level=c(95), h=50))
+ACDVF.forcast.plot = autoplot(forecast(stlm(new_ACDVF_series, s.window=35, lambda = lambda ), level=c(95), h=50))
+```
+
+```{r}
+# on park vs pm2.5
+onpark=mobility[211:315,7]
+tsonpark=ts(onpark,start=c(2.15,1),freq=30)
+plot(tsonpark)
+## auto.arima approach,AIC=975.38
+# sarima(onpark,0,1,2)
+onparkfore= forecast(auto.arima(tsonpark),h=50,level=c(95))
+autoplot(onparkfore)
+##STL
+lambda<-BoxCox.lambda(onpark)
+lambda
+plot(mstl(tsonpark))
+stlrem = remainder(mstl(tsonpark))
+acf(stlrem,lag.max=100)
+pacf(stlrem,lag.max=100)
+#aic
+park1<-arima(stlrem, c(0,0,2),include.mean = FALSE) #931.2
+park2<-arima(stlrem, c(2,0,0), include.mean=FALSE ) #931.71
+parkauto<-auto.arima(stlrem,seasonal=FALSE, stationary=TRUE, allowmean = FALSE) #929.27
+#sarima(stlrem,0,0,1)
+stlfore<- forecast (parkauto, level=c(95), h=50)
+autoplot(stlfore)
+autoplot(forecast(stlm(tsonpark, lambda = lambda ), level=c(95), h=50),ylab='percent change of park mobility',main='Forecast of Ontario Park Mobility')
+toronto$pm2.5
+tspm=ts(toronto$pm2.5,start=c(2.15,1),freq=30)
+plot(tspm)
+##STL
+lambda1<-BoxCox.lambda(tspm)
+lambda1
+plot(mstl(tspm))
+stlrem1 = remainder(mstl(tspm))
+# acf & pacf
+acf(stlrem1,lag.max=100)
+pacf(stlrem1,lag.max=100)
+#aic
+pm1<-arima(stlrem1, c(0,0,2),include.mean = FALSE) #760.43
+pm2<-arima(stlrem1, c(1,0,0), include.mean=FALSE ) #760.94
+pmauto<-auto.arima(stlrem1,seasonal=FALSE, stationary=TRUE, allowmean = FALSE) #752.89
+#sarima(stlrem1,2,0,2)
+stlfore1<- forecast (pmauto, level=c(95), h=50)
+autoplot(stlfore1)
+autoplot(forecast(stlm(tspm, lambda = lambda1), level=c(95), h=50),ylab='pm 2.5 level',main='Forecast of Toronto pm 2.5 level')
+```
+
+## Supplementary Materials that is not shown on our slides
+
+```{r,fig.show='hide'}
+#visualization of pm2.5 across provinces
+library(ggplot2)
+library(readr)
+library(forecast)
+library(sarima)
+par(mfrow=c(2,2))
+toronto <- read_csv("/Users/yangyiwen/Desktop/torontopm2.5.csv", col_types = cols(date = col_date(format = "%Y/%m/%d")))
+ggplot(data = toronto, mapping = aes(x = date, y = pm2.5,group=1))+
+  geom_line() +
+  ggtitle('pm2.5 of Downtown Toronto')
+winnipeg<- read_csv("/Users/yangyiwen/Desktop/winnipegpm2.5.csv", col_types = cols(date = col_date(format = "%Y/%m/%d")))
+ggplot(data = winnipeg, mapping = aes(x = date, y = pm2.5,group=1))+
+  geom_line() +
+  ggtitle('pm2.5 of Winnipeg')
+quebec <-read_csv("/Users/yangyiwen/Desktop/quebecpm2.5.csv", col_types = cols(date = col_date(format = "%Y/%m/%d")))
+ggplot(data = quebec, mapping = aes(x = date, y = pm2.5,group=1))+
+  geom_line() +
+  ggtitle('pm2.5 of Quebec')
+vancouver <- read_csv("/Users/yangyiwen/Desktop/vancouverpm2.5.csv", col_types = cols(date = col_date(format = "%Y/%m/%d")))
+vancouver <- na.omit(vancouver)
+ggplot(data = vancouver, mapping = aes(x = date, y = pm2.5,group=1))+
+  geom_line() +
+  ggtitle('pm2.5 of Vancouver')
+queretail = mobility[316:420,6]
+quepark = mobility[316:420,7]
+ququetransit = mobility[316:420,8]
+quework=mobility[316:420,9]
+queres = mobility[316:420,10]
+#plot(queretail,quebec$pm2.5)
+manretail=mobility[106:210,6]
+manpark = mobility[106:210,7]
+mantransit = mobility[106:210,8]
+manwork=mobility[106:210,9]
+manres = mobility[106:210,10]
+#plot(manpark,winnipeg$pm2.5)
+##ARMA(2,2) model for toronto
+#sarima(toronto$pm2.5,2,0,2)
+torontoforecast = forecast(auto.arima(toronto$pm2.5),h=20,level=c(95))
+autoplot(torontoforecast,xlab='time',ylab='pm2.5 level',main='pm2.5 level of Downtown Toronto with Forecast')
+torontowithforecast= c(toronto$pm2.5,torontoforecast$mean)
+plot(torontowithforecast,type='l',xlab='time',ylab='pm2.5 level',main='pm2.5 of Downtown Toronto with Forecast')
+lines(x=seq(from=length(toronto$pm2.5)+1,to=length(torontowithforecast)),y=c(torontoforecast$mean),col='red')
+##AR1 model for vancouver
+#sarima(vancouver$pm2.5,1,0,0)
+vancouverforecast = forecast(auto.arima(vancouver$pm2.5),h=10)
+vancouverwithforecast= c(vancouver$pm2.5,vancouverforecast$mean)
+plot(vancouverwithforecast,type='l',xlab='time',ylab='pm2.5 level',main='pm2.5 of Vancouver with Forecast')
+lines(x=seq(from=length(vancouver$pm2.5)+1,to=length(vancouverwithforecast)),y=c(vancouverforecast$mean),col='red')
+##ARMA(4,1,1)
+#sarima(diff(quebec$pm2.5),4,0,1)
+quebecforecast = forecast(auto.arima(quebec$pm2.5),h=10)
+quebecwithforecast= c(quebec$pm2.5,quebecforecast$mean)
+plot(quebecwithforecast,type='l',xlab='time',ylab='pm2.5 level',main='pm2.5 of Quebec City with Forecast')
+lines(x=seq(from=length(quebec$pm2.5)+1,to=length(quebecwithforecast)),y=c(quebecforecast$mean),col='red')
+##MA1
+#sarima(winnipeg$pm2.5,4,0,1)
+winforecast = forecast(auto.arima(winnipeg$pm2.5),h=10)
+winwithforecast= c(winnipeg$pm2.5,winforecast$mean)
+plot(winwithforecast,type='l',xlab='time',ylab='pm2.5 level',main='pm2.5 of Winnipeg with Forecast')
+lines(x=seq(from=length(winnipeg$pm2.5)+1,to=length(winwithforecast)),y=c(winforecast$mean),col='red')
